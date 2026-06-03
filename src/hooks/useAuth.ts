@@ -55,9 +55,10 @@ export function useAuth(): UseAuthResult {
       setLoading(false);
       return;
     }
+    const client = supabase;
     let cancelled = false;
 
-    const { data: sub } = supabase.auth.onAuthStateChange((event, newSession) => {
+    const { data: sub } = client.auth.onAuthStateChange((event, newSession) => {
       setSession(newSession);
       setUser(newSession?.user ?? null);
       setAuthEvent(event);
@@ -67,7 +68,7 @@ export function useAuth(): UseAuthResult {
     const params = recoveryParamsRef.current;
     if (params) {
       cleanUrlHash();
-      supabase.auth
+      client.auth
         .setSession({ access_token: params.accessToken, refresh_token: params.refreshToken })
         .then(({ data, error }) => {
           if (cancelled) return;
@@ -79,18 +80,14 @@ export function useAuth(): UseAuthResult {
           setLoading(false);
         });
     } else {
-      supabase.auth.getSession().then(async ({ data: sessionData }) => {
+      client.auth.getSession().then(async ({ data: sessionData }) => {
         if (cancelled) return;
         setSession(sessionData.session);
-        // Seed user from the cached JWT immediately so the app renders without waiting.
         setUser(sessionData.session?.user ?? null);
         setLoading(false);
 
-        // Then fetch the live user record from the server in the background.
-        // The JWT caches metadata at issue time, so another device's updateUser
-        // won't be visible until we ask the server directly.
         if (sessionData.session) {
-          const { data: liveData } = await supabase.auth.getUser();
+          const { data: liveData } = await client.auth.getUser();
           if (!cancelled && liveData.user) setUser(liveData.user);
         }
       });
