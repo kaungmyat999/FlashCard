@@ -31,7 +31,7 @@ import { calculateAnki, previewLabel, STARTING_EASE_FACTOR, type AnkiRating } fr
 import { generateExampleSentence, testGeminiApiKey } from './utils/gemini';
 import { useLocalStorage } from './hooks/useLocalStorage';
 import { useAuth } from './hooks/useAuth';
-import { isSupabaseConfigured } from './lib/supabase';
+import { supabase, isSupabaseConfigured } from './lib/supabase';
 import {
   fetchBlocks,
   createBlock,
@@ -60,22 +60,39 @@ function App() {
   const [theme, setTheme] = useLocalStorage<'dark' | 'light'>('theme', 'dark');
   const [selectedModel, setSelectedModel] = useLocalStorage<string>('selected_model', 'gemini-3-flash-preview');
 
-  // Per-user Gemini API key: stored at `gemini_api_key:<user.id>` so each
-  // signed-in user must enter their own key. Never falls back to a shared value.
+  // Gemini API key — persisted in Supabase user metadata so it syncs across
+  // every device. We call getUser() (a live server fetch) rather than reading
+  // user.user_metadata from the session JWT, because the JWT is minted at login
+  // time and won't reflect a key saved on another device until the token rotates.
   const [apiKey, setApiKeyState] = useState('');
+  const userId = user?.id ?? null;
   useEffect(() => {
-    if (!user) {
+    if (!userId) {
       setApiKeyState('');
       return;
     }
-    setApiKeyState(localStorage.getItem(`gemini_api_key:${user.id}`) ?? '');
-  }, [user]);
+    let cancelled = false;
+    supabase?.auth.getUser().then(({ data }) => {
+      if (cancelled) return;
+      const serverKey = (data.user?.user_metadata?.gemini_api_key as string) ?? '';
+      // One-time migration: promote any legacy localStorage key to the server.
+      const legacyKey = localStorage.getItem(`gemini_api_key:${userId}`) ?? '';
+      if (!serverKey && legacyKey) {
+        supabase?.auth.updateUser({ data: { gemini_api_key: legacyKey } });
+        localStorage.removeItem(`gemini_api_key:${userId}`);
+        setApiKeyState(legacyKey);
+      } else {
+        if (legacyKey) localStorage.removeItem(`gemini_api_key:${userId}`);
+        setApiKeyState(serverKey);
+      }
+    });
+    return () => { cancelled = true; };
+  }, [userId]);
+
   const setApiKey = (next: string) => {
     setApiKeyState(next);
     if (!user) return;
-    const storageKey = `gemini_api_key:${user.id}`;
-    if (next) localStorage.setItem(storageKey, next);
-    else localStorage.removeItem(storageKey);
+    supabase?.auth.updateUser({ data: { gemini_api_key: next || null } });
   };
 
   // Server data
