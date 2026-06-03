@@ -31,6 +31,7 @@ import {
 import type { Card, ReviewHistoryEntry } from './types';
 import { calculateAnki, previewLabel, STARTING_EASE_FACTOR, type AnkiRating } from './utils/sm2';
 import { generateExampleSentence, testGeminiApiKey } from './utils/gemini';
+import { fetchMwDefinition } from './utils/dictionary';
 import { useLocalStorage } from './hooks/useLocalStorage';
 import { useAuth } from './hooks/useAuth';
 import { supabase, isSupabaseConfigured } from './lib/supabase';
@@ -114,8 +115,12 @@ function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [newBlockName, setNewBlockName] = useState('');
   const [newBlockDesc, setNewBlockDesc] = useState('');
+  const [newBlockType, setNewBlockType] = useState<'vocab' | 'notes'>('vocab');
   const [newWord, setNewWord] = useState('');
   const [newDefinition, setNewDefinition] = useState('');
+  const [lookupLoading, setLookupLoading] = useState(false);
+  const [lookupPartOfSpeech, setLookupPartOfSpeech] = useState('');
+  const [lookupError, setLookupError] = useState<string | null>(null);
 
   // Card row UI: edit + copy feedback
   const [editingCardId, setEditingCardId] = useState<string | null>(null);
@@ -224,10 +229,11 @@ function App() {
     e.preventDefault();
     if (!user || !newBlockName.trim()) return;
     try {
-      const created = await createBlock(user.id, newBlockName.trim(), newBlockDesc.trim());
+      const created = await createBlock(user.id, newBlockName.trim(), newBlockDesc.trim(), newBlockType);
       setBlocks((prev) => [...prev, created]);
       setNewBlockName('');
       setNewBlockDesc('');
+      setNewBlockType('vocab');
     } catch (err: any) {
       setServerError(err?.message ?? 'Failed to create block.');
     }
@@ -379,6 +385,27 @@ function App() {
     }
   };
 
+  const handleWordBlur = async () => {
+    const word = newWord.trim();
+    if (!word || newDefinition.trim()) return;
+    setLookupLoading(true);
+    setLookupError(null);
+    setLookupPartOfSpeech('');
+    try {
+      const result = await fetchMwDefinition(word);
+      if (result) {
+        setNewDefinition(result.definition);
+        setLookupPartOfSpeech(result.partOfSpeech);
+      } else {
+        setLookupError('No definition found for this word.');
+      }
+    } catch {
+      setLookupError('Dictionary lookup failed.');
+    } finally {
+      setLookupLoading(false);
+    }
+  };
+
   const handleAddNewCard = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user || !currentBlockId || !newWord.trim() || !newDefinition.trim()) return;
@@ -401,6 +428,8 @@ function App() {
       setCards((prev) => [created, ...prev]);
       setNewWord('');
       setNewDefinition('');
+      setLookupPartOfSpeech('');
+      setLookupError(null);
       setCurrentView('dashboard');
     } catch (err: any) {
       setServerError(err?.message ?? 'Failed to add card.');
@@ -733,12 +762,37 @@ function App() {
             <form onSubmit={handleCreateBlock} className="glass-form-card" style={{ marginBottom: '1.5rem' }}>
               <h3 className="section-title" style={{ marginTop: 0 }}>New block</h3>
               <div className="form-group">
+                <span className="form-label">Type</span>
+                <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.25rem' }}>
+                  {(['vocab', 'notes'] as const).map((t) => (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() => setNewBlockType(t)}
+                      className="nav-btn"
+                      style={{
+                        borderRadius: '8px',
+                        fontSize: '0.88rem',
+                        background: newBlockType === t ? 'var(--primary-glow)' : 'rgba(255,255,255,0.04)',
+                        color: newBlockType === t ? 'var(--primary)' : 'var(--text-secondary)',
+                        borderColor: newBlockType === t ? 'rgba(99,102,241,0.2)' : 'transparent',
+                        borderWidth: '1px',
+                        borderStyle: 'solid',
+                        textTransform: 'capitalize',
+                      }}
+                    >
+                      {t}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="form-group">
                 <label htmlFor="block-name" className="form-label">Name</label>
                 <input
                   id="block-name"
                   className="form-input"
                   required
-                  placeholder="e.g. GRE Verbs"
+                  placeholder={newBlockType === 'vocab' ? 'e.g. GRE Verbs' : 'e.g. Biology Notes'}
                   value={newBlockName}
                   onChange={(e) => setNewBlockName(e.target.value)}
                 />
@@ -781,6 +835,13 @@ function App() {
                     <div>
                       <div className="word-header">
                         <h4 className="word-title">{block.name}</h4>
+                        <span className="tag-badge" style={{
+                          background: (block.block_type ?? 'vocab') === 'vocab' ? 'var(--primary-glow)' : 'var(--info-glow)',
+                          color: (block.block_type ?? 'vocab') === 'vocab' ? 'var(--primary)' : 'var(--info)',
+                          textTransform: 'capitalize',
+                        }}>
+                          {block.block_type ?? 'vocab'}
+                        </span>
                       </div>
                       {block.description && <p className="word-definition">{block.description}</p>}
                     </div>
@@ -858,6 +919,7 @@ function App() {
               </button>
             </div>
 
+            {(currentBlock.block_type ?? 'vocab') === 'vocab' && (
             <div style={{ marginBottom: '1.5rem' }}>
               <button
                 type="button"
@@ -898,6 +960,7 @@ function App() {
                 </div>
               )}
             </div>
+            )}
 
             <div className="search-section">
               <h3 className="section-title">Cards in this block</h3>
@@ -1261,20 +1324,35 @@ function App() {
                   required
                   placeholder="e.g. Ephemeral"
                   value={newWord}
-                  onChange={(e) => setNewWord(e.target.value)}
+                  onChange={(e) => { setNewWord(e.target.value); setLookupError(null); setLookupPartOfSpeech(''); }}
+                  onBlur={(currentBlock.block_type ?? 'vocab') === 'vocab' ? handleWordBlur : undefined}
                   className="form-input"
                 />
               </div>
 
               <div className="form-group">
-                <label htmlFor="definition-input" className="form-label">Definition / Meaning</label>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '0.35rem' }}>
+                  <label htmlFor="definition-input" className="form-label" style={{ marginBottom: 0 }}>
+                    Definition / Meaning
+                  </label>
+                  {lookupLoading && (
+                    <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Looking up…</span>
+                  )}
+                  {lookupPartOfSpeech && !lookupLoading && (
+                    <span style={{ fontSize: '0.78rem', color: 'var(--info)', fontStyle: 'italic' }}>{lookupPartOfSpeech}</span>
+                  )}
+                  {lookupError && !lookupLoading && (
+                    <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>{lookupError}</span>
+                  )}
+                </div>
                 <textarea
                   id="definition-input"
                   required
-                  placeholder="e.g. Lasting for a very short time; transient."
+                  placeholder={lookupLoading ? 'Fetching from dictionary…' : 'e.g. Lasting for a very short time; transient.'}
                   value={newDefinition}
                   onChange={(e) => setNewDefinition(e.target.value)}
                   className="form-input form-textarea"
+                  disabled={lookupLoading}
                 />
               </div>
 
@@ -1282,7 +1360,7 @@ function App() {
                 <button type="button" className="btn-secondary" onClick={() => setCurrentView('dashboard')}>
                   Cancel
                 </button>
-                <button type="submit" className="btn-primary btn-submit">
+                <button type="submit" className="btn-primary btn-submit" disabled={lookupLoading}>
                   Save Card
                 </button>
               </div>

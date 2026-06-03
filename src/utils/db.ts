@@ -10,6 +10,7 @@ export interface DbBlock {
   user_id: string;
   name: string;
   description: string | null;
+  block_type: 'vocab' | 'notes';
   created_at: string;
   updated_at: string;
 }
@@ -105,12 +106,13 @@ export async function fetchBlocks(): Promise<DbBlock[]> {
 export async function createBlock(
   userId: string,
   name: string,
-  description?: string
+  description?: string,
+  blockType: 'vocab' | 'notes' = 'vocab'
 ): Promise<DbBlock> {
   const client = ensureClient();
   const { data, error } = await client
     .from('blocks')
-    .insert({ user_id: userId, name, description: description ?? '' })
+    .insert({ user_id: userId, name, description: description ?? '', block_type: blockType })
     .select()
     .single();
   if (error) throw error;
