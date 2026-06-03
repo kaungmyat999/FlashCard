@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   Plus,
   Search,
@@ -26,6 +26,7 @@ import {
   Target,
   Flame,
   Upload,
+  ChevronDown,
 } from 'lucide-react';
 import type { Card, ReviewHistoryEntry } from './types';
 import { calculateAnki, previewLabel, STARTING_EASE_FACTOR, type AnkiRating } from './utils/sm2';
@@ -448,9 +449,9 @@ function App() {
   const [copiedAll, setCopiedAll] = useState(false);
 
   // Text-file import
+  const [showImport, setShowImport] = useState(false);
   const [importWords, setImportWords] = useState<string[] | null>(null);
   const [isImporting, setIsImporting] = useState(false);
-  const importFileInputRef = useRef<HTMLInputElement>(null);
   const handleCopyAllWords = async (words: string[]) => {
     if (words.length === 0) return;
     try {
@@ -857,13 +858,46 @@ function App() {
               </button>
             </div>
 
-            <input
-              ref={importFileInputRef}
-              type="file"
-              accept=".txt,text/plain"
-              style={{ display: 'none' }}
-              onChange={handleImportFile}
-            />
+            <div style={{ marginBottom: '1.5rem' }}>
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => { setShowImport((v) => !v); setImportWords(null); }}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  padding: '0.5rem 1rem',
+                  fontSize: '0.88rem',
+                  borderRadius: '8px',
+                  width: 'auto',
+                }}
+              >
+                <Upload size={15} />
+                <span>Import from text file</span>
+                <ChevronDown size={14} style={{ transition: 'transform 0.2s', transform: showImport ? 'rotate(180deg)' : 'rotate(0deg)' }} />
+              </button>
+
+              {showImport && (
+                <div className="glass-form-card" style={{ maxWidth: '100%', marginTop: '0.75rem', padding: '1rem 1.5rem' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', cursor: 'pointer' }}>
+                    <Upload size={16} style={{ color: 'var(--primary)', flexShrink: 0 }} />
+                    <span style={{ fontWeight: 500, color: 'var(--text-primary)', fontSize: '0.9rem' }}>
+                      Choose a .txt file
+                    </span>
+                    <input
+                      type="file"
+                      accept=".txt,text/plain"
+                      onChange={handleImportFile}
+                      style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}
+                    />
+                  </label>
+                  <p style={{ marginTop: '0.5rem', marginLeft: '1.75rem', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                    Words separated by spaces or newlines. Duplicates and existing words are skipped.
+                  </p>
+                </div>
+              )}
+            </div>
 
             <div className="search-section">
               <h3 className="section-title">Cards in this block</h3>
@@ -878,26 +912,6 @@ function App() {
                     className="search-input"
                   />
                 </div>
-                <button
-                  type="button"
-                  className="btn-secondary"
-                  onClick={() => importFileInputRef.current?.click()}
-                  title="Import words from a .txt file (one word per whitespace/newline)"
-                  style={{
-                    flex: 'none',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '0.4rem',
-                    padding: '0.5rem 0.9rem',
-                    fontSize: '0.85rem',
-                    borderRadius: '8px',
-                    whiteSpace: 'nowrap',
-                    width: 'auto',
-                  }}
-                >
-                  <Upload size={16} />
-                  <span>Import .txt</span>
-                </button>
                 <button
                   type="button"
                   className="btn-secondary"
