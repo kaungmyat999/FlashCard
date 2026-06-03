@@ -14,6 +14,7 @@
   -webkit-backdrop-filter: var(--glass-blur);
   border-bottom: 1px solid var(--border-color);
   padding: 1rem 2rem;
+  padding-top: calc(1rem + env(safe-area-inset-top));
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -109,6 +110,7 @@
   max-width: 1000px;
   margin: 0 auto;
   padding: 2.5rem 1.5rem;
+  padding-bottom: calc(2.5rem + env(safe-area-inset-bottom));
 }
 
 /* Banner Alert */
@@ -902,6 +904,7 @@
 @media (max-width: 640px) {
   .glass-nav {
     padding: 1rem;
+    padding-top: calc(1rem + env(safe-area-inset-top));
   }
   
   .logo-container span {
@@ -930,7 +933,7 @@
   }
   
   .flashcard-wrapper {
-    height: 340px;
+    height: 460px;
   }
   
   .flashcard-word {
