@@ -54,10 +54,10 @@ export function AuthScreen() {
         </div>
 
         <form onSubmit={handleSubmit} className="glass-form-card">
-          <h2 className="form-title">
+          <h2 className="form-title" style={{ textAlign: 'center' }}>
             {mode === 'signin' ? 'Sign in' : mode === 'signup' ? 'Create account' : 'Reset password'}
           </h2>
-          <p className="form-desc">
+          <p className="form-desc" style={{ textAlign: 'center' }}>
             {mode === 'signin'
               ? 'Sign in to access your blocks and vocabulary cards.'
               : mode === 'signup'

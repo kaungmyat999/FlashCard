@@ -228,6 +228,30 @@ export async function updateCardExample(
   if (error) throw error;
 }
 
+export async function insertCards(
+  cards: Omit<Card, 'id' | 'createdAt'>[],
+  blockId: string,
+  userId: string
+): Promise<Card[]> {
+  const client = ensureClient();
+  const rows = cards.map((card) => ({
+    block_id: blockId,
+    user_id: userId,
+    word: card.word,
+    definition: card.definition,
+    example_sentence: card.exampleSentence,
+    interval: card.interval,
+    ease_factor: card.easeFactor,
+    repetitions: card.repetitions,
+    due_date: card.dueDate,
+    state: card.state,
+    learning_step: card.learningStep,
+  }));
+  const { data, error } = await client.from('cards').insert(rows).select();
+  if (error) throw error;
+  return (data ?? []).map(dbCardToCard);
+}
+
 export async function deleteCard(cardId: string): Promise<void> {
   const client = ensureClient();
   const { error } = await client.from('cards').delete().eq('id', cardId);

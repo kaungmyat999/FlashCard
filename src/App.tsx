@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Plus,
   Search,
@@ -25,6 +25,7 @@ import {
   TrendingUp,
   Target,
   Flame,
+  Upload,
 } from 'lucide-react';
 import type { Card, ReviewHistoryEntry } from './types';
 import { calculateAnki, previewLabel, STARTING_EASE_FACTOR, type AnkiRating } from './utils/sm2';
@@ -38,6 +39,7 @@ import {
   deleteBlock,
   fetchCards,
   insertCard,
+  insertCards,
   updateCardScheduling,
   updateCardExample,
   updateCardContent,
@@ -444,6 +446,11 @@ function App() {
   };
 
   const [copiedAll, setCopiedAll] = useState(false);
+
+  // Text-file import
+  const [importWords, setImportWords] = useState<string[] | null>(null);
+  const [isImporting, setIsImporting] = useState(false);
+  const importFileInputRef = useRef<HTMLInputElement>(null);
   const handleCopyAllWords = async (words: string[]) => {
     if (words.length === 0) return;
     try {
@@ -463,6 +470,55 @@ function App() {
       setCards((prev) => prev.filter((c) => c.id !== cardId));
     } catch (err: any) {
       setServerError(err?.message ?? 'Failed to delete card.');
+    }
+  };
+
+  const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const text = (ev.target?.result as string) ?? '';
+      const seen = new Set<string>();
+      const parsed: string[] = [];
+      for (const raw of text.split(/\s+/)) {
+        const w = raw.trim();
+        if (!w) continue;
+        const key = w.toLowerCase();
+        if (!seen.has(key)) { seen.add(key); parsed.push(w); }
+      }
+      const existingLower = new Set(cards.map((c) => c.word.toLowerCase()));
+      setImportWords(parsed.filter((w) => !existingLower.has(w.toLowerCase())));
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  const handleConfirmImport = async () => {
+    if (!importWords?.length || !user || !currentBlockId) return;
+    setIsImporting(true);
+    try {
+      const created = await insertCards(
+        importWords.map((word) => ({
+          word,
+          definition: '',
+          exampleSentence: null,
+          interval: 0,
+          easeFactor: STARTING_EASE_FACTOR,
+          repetitions: 0,
+          dueDate: new Date().toISOString(),
+          state: 'new' as const,
+          learningStep: 0,
+        })),
+        currentBlockId,
+        user.id
+      );
+      setCards((prev) => [...created, ...prev]);
+      setImportWords(null);
+    } catch (err: any) {
+      setServerError(err?.message ?? 'Failed to import words.');
+    } finally {
+      setIsImporting(false);
     }
   };
 
@@ -801,6 +857,14 @@ function App() {
               </button>
             </div>
 
+            <input
+              ref={importFileInputRef}
+              type="file"
+              accept=".txt,text/plain"
+              style={{ display: 'none' }}
+              onChange={handleImportFile}
+            />
+
             <div className="search-section">
               <h3 className="section-title">Cards in this block</h3>
               <div className="table-toolbar">
@@ -814,6 +878,26 @@ function App() {
                     className="search-input"
                   />
                 </div>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => importFileInputRef.current?.click()}
+                  title="Import words from a .txt file (one word per whitespace/newline)"
+                  style={{
+                    flex: 'none',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.4rem',
+                    padding: '0.5rem 0.9rem',
+                    fontSize: '0.85rem',
+                    borderRadius: '8px',
+                    whiteSpace: 'nowrap',
+                    width: 'auto',
+                  }}
+                >
+                  <Upload size={16} />
+                  <span>Import .txt</span>
+                </button>
                 <button
                   type="button"
                   className="btn-secondary"
@@ -839,6 +923,62 @@ function App() {
                 </button>
               </div>
             </div>
+
+            {importWords !== null && (
+              <div className="glass-form-card" style={{ maxWidth: '100%', marginBottom: '1.5rem' }}>
+                <h3 className="section-title" style={{ marginTop: 0 }}>
+                  Import preview — {importWords.length} new word{importWords.length !== 1 ? 's' : ''} found
+                </h3>
+                {importWords.length === 0 ? (
+                  <p style={{ color: 'var(--text-secondary)', marginBottom: '1rem' }}>
+                    No new words to import — all words from this file already exist in the block.
+                  </p>
+                ) : (
+                  <div style={{
+                    maxHeight: '150px',
+                    overflowY: 'auto',
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    gap: '0.4rem',
+                    padding: '0.75rem',
+                    background: 'rgba(0,0,0,0.1)',
+                    borderRadius: '8px',
+                    marginBottom: '1rem',
+                  }}>
+                    {importWords.map((w, i) => (
+                      <span key={i} className="tag-badge" style={{ background: 'var(--primary-glow)', color: 'var(--primary)' }}>
+                        {w}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>
+                  Cards will be created with empty definitions — edit each card after import to fill them in.
+                </p>
+                <div style={{ display: 'flex', gap: '0.75rem' }}>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => setImportWords(null)}
+                    disabled={isImporting}
+                    style={{ flex: 'none', padding: '0.5rem 1.25rem', fontSize: '0.9rem' }}
+                  >
+                    Cancel
+                  </button>
+                  {importWords.length > 0 && (
+                    <button
+                      type="button"
+                      className="btn-primary"
+                      onClick={handleConfirmImport}
+                      disabled={isImporting}
+                    >
+                      <Upload size={16} />
+                      <span>{isImporting ? 'Importing…' : `Import ${importWords.length} word${importWords.length !== 1 ? 's' : ''}`}</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
 
             {filteredCards.length > 0 ? (
               <div className="cards-table-wrapper">
