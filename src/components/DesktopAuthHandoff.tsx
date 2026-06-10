@@ -4,17 +4,21 @@ import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../lib/supabase';
 import { AuthScreen } from './AuthScreen';
 
-// Custom URL scheme the Electron desktop app registers. We hand the freshly
-// minted Supabase session back to it through the URL fragment (which, unlike
-// the query string, is never sent to any server).
-const DESKTOP_SCHEME = 'flashcard://auth';
+// The desktop app opens a localhost loopback server and passes us its port +
+// a one-time `state` nonce via the query string. After sign-in we redirect the
+// session straight to that local server. (Loopback avoids the macOS custom-URL-
+// scheme problems that plague unpackaged Electron.)
+const search = new URLSearchParams(window.location.search);
+const CB_PORT = search.get('cb_port');
+const STATE = search.get('state') ?? '';
 
 function buildHandoffUrl(accessToken: string, refreshToken: string): string {
-  const fragment = new URLSearchParams({
+  const query = new URLSearchParams({
     access_token: accessToken,
     refresh_token: refreshToken,
+    state: STATE,
   }).toString();
-  return `${DESKTOP_SCHEME}#${fragment}`;
+  return `http://127.0.0.1:${CB_PORT}/auth?${query}`;
 }
 
 /**
@@ -37,6 +41,11 @@ export function DesktopAuthHandoff() {
     (async () => {
       if (!supabase) {
         setError('Supabase is not configured on the web app.');
+        delivered.current = false;
+        return;
+      }
+      if (!CB_PORT) {
+        setError('Missing callback port. Start sign-in from the desktop app’s "Sign in with browser" button.');
         delivered.current = false;
         return;
       }
