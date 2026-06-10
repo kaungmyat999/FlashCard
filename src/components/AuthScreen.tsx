@@ -1,10 +1,10 @@
 import { useState } from 'react';
-import { GraduationCap, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { GraduationCap, AlertCircle, CheckCircle2, Info } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 
 type AuthMode = 'signin' | 'signup' | 'forgot';
 
-export function AuthScreen() {
+export function AuthScreen({ notice }: { notice?: string } = {}) {
   const { signIn, signUp, resetPassword } = useAuth();
   const [mode, setMode] = useState<AuthMode>('signin');
   const [email, setEmail] = useState('');
@@ -52,6 +52,15 @@ export function AuthScreen() {
           <GraduationCap size={32} />
           <span style={{ fontSize: '1.4rem', fontWeight: 600 }}>FlashCard AI</span>
         </div>
+
+        {notice && (
+          <div className="alert-banner" style={{ marginBottom: '1rem' }}>
+            <div className="alert-content">
+              <Info className="alert-icon" size={18} />
+              <span>{notice}</span>
+            </div>
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="glass-form-card">
           <h2 className="form-title" style={{ textAlign: 'center' }}>
