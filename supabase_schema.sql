@@ -10,9 +10,13 @@ CREATE TABLE IF NOT EXISTS blocks (
   user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   description TEXT DEFAULT '',
+  block_type TEXT NOT NULL DEFAULT 'vocab',
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
+
+-- Backfill for projects created before the vocab/notes block type was added.
+ALTER TABLE blocks ADD COLUMN IF NOT EXISTS block_type TEXT NOT NULL DEFAULT 'vocab';
 
 -- 2. Cards (vocabulary flashcards within a block)
 CREATE TABLE IF NOT EXISTS cards (

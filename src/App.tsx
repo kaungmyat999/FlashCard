@@ -594,57 +594,66 @@ function App() {
       let workingBlocks = blocks;
       const createdState: DbBlock[] = [];
       for (const pb of jsonPreview) {
-        let target = workingBlocks.find(
-          (b) => b.name.trim().toLowerCase() === pb.name.toLowerCase()
-        );
-        if (!target) {
-          target = await createBlock(user.id, pb.name, '', 'vocab');
-          workingBlocks = [...workingBlocks, target];
-          createdState.push(target);
-          createdBlocks.push(pb.name);
-        }
-
-        const existing = await fetchCards(target.id);
-        const existingWords = new Set(existing.map((c) => c.word.trim().toLowerCase()));
-        const seenInBatch = new Set<string>();
-        const toInsert: Omit<Card, 'id' | 'createdAt'>[] = [];
-
-        for (const entry of pb.entries) {
-          const key = entry.word.toLowerCase();
-          if (existingWords.has(key)) {
-            errors.push({
-              block: pb.name,
-              word: entry.word,
-              reason: `A card for "${entry.word}" already exists in "${pb.name}" — skipped.`,
-            });
-            continue;
+        // Isolate each block so one server error doesn't abort the whole import.
+        try {
+          let target = workingBlocks.find(
+            (b) => b.name.trim().toLowerCase() === pb.name.toLowerCase()
+          );
+          if (!target) {
+            target = await createBlock(user.id, pb.name, '', 'vocab');
+            workingBlocks = [...workingBlocks, target];
+            createdState.push(target);
+            createdBlocks.push(pb.name);
           }
-          if (seenInBatch.has(key)) {
-            errors.push({
-              block: pb.name,
+
+          const existing = await fetchCards(target.id);
+          const existingWords = new Set(existing.map((c) => c.word.trim().toLowerCase()));
+          const seenInBatch = new Set<string>();
+          const toInsert: Omit<Card, 'id' | 'createdAt'>[] = [];
+
+          for (const entry of pb.entries) {
+            const key = entry.word.toLowerCase();
+            if (existingWords.has(key)) {
+              errors.push({
+                block: pb.name,
+                word: entry.word,
+                reason: `A card for "${entry.word}" already exists in "${pb.name}" — skipped.`,
+              });
+              continue;
+            }
+            if (seenInBatch.has(key)) {
+              errors.push({
+                block: pb.name,
+                word: entry.word,
+                reason: `"${entry.word}" appears more than once under "${pb.name}" in the file — only the first was imported.`,
+              });
+              continue;
+            }
+            seenInBatch.add(key);
+            toInsert.push({
               word: entry.word,
-              reason: `"${entry.word}" appears more than once under "${pb.name}" in the file — only the first was imported.`,
+              definition: entry.definition,
+              exampleSentence: entry.exampleSentence,
+              interval: 0,
+              easeFactor: STARTING_EASE_FACTOR,
+              repetitions: 0,
+              dueDate: new Date().toISOString(),
+              state: 'new',
+              learningStep: 0,
             });
-            continue;
           }
-          seenInBatch.add(key);
-          toInsert.push({
-            word: entry.word,
-            definition: entry.definition,
-            exampleSentence: entry.exampleSentence,
-            interval: 0,
-            easeFactor: STARTING_EASE_FACTOR,
-            repetitions: 0,
-            dueDate: new Date().toISOString(),
-            state: 'new',
-            learningStep: 0,
+
+          if (toInsert.length > 0) {
+            await insertCards(toInsert, target.id, user.id);
+          }
+          added.push({ name: pb.name, count: toInsert.length });
+        } catch (blockErr: any) {
+          errors.push({
+            block: pb.name,
+            word: '*',
+            reason: `Block "${pb.name}" failed: ${blockErr?.message ?? String(blockErr)}`,
           });
         }
-
-        if (toInsert.length > 0) {
-          await insertCards(toInsert, target.id, user.id);
-        }
-        added.push({ name: pb.name, count: toInsert.length });
       }
 
       if (createdState.length > 0) {
