@@ -53,6 +53,7 @@ import {
   type DbReviewHistory,
 } from './utils/db';
 import { computeStats, type StatsMetrics } from './utils/stats';
+import { parseImportJson, type ParsedBlock } from './utils/jsonImport';
 import { AuthScreen } from './components/AuthScreen';
 import { ResetPasswordScreen } from './components/ResetPasswordScreen';
 import './App.css';
@@ -481,6 +482,17 @@ function App() {
   const [showImport, setShowImport] = useState(false);
   const [importWords, setImportWords] = useState<string[] | null>(null);
   const [isImporting, setIsImporting] = useState(false);
+
+  // JSON import (can create/append across multiple blocks)
+  const [showJsonImport, setShowJsonImport] = useState(false);
+  const [jsonPreview, setJsonPreview] = useState<ParsedBlock[] | null>(null);
+  const [jsonParseError, setJsonParseError] = useState<string | null>(null);
+  const [isJsonImporting, setIsJsonImporting] = useState(false);
+  const [jsonResult, setJsonResult] = useState<{
+    added: { name: string; count: number }[];
+    createdBlocks: string[];
+    errors: { block: string; word: string; reason: string }[];
+  } | null>(null);
   const handleCopyAllWords = async (words: string[]) => {
     if (words.length === 0) return;
     try {
@@ -549,6 +561,109 @@ function App() {
       setServerError(err?.message ?? 'Failed to import words.');
     } finally {
       setIsImporting(false);
+    }
+  };
+
+  const handleJsonImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setJsonResult(null);
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const parsed = parseImportJson((ev.target?.result as string) ?? '');
+        setJsonPreview(parsed.blocks);
+        setJsonParseError(null);
+      } catch (err: any) {
+        setJsonPreview(null);
+        setJsonParseError(err?.message ?? 'Failed to parse JSON.');
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  const handleConfirmJsonImport = async () => {
+    if (!jsonPreview || !user) return;
+    setIsJsonImporting(true);
+    const added: { name: string; count: number }[] = [];
+    const createdBlocks: string[] = [];
+    const errors: { block: string; word: string; reason: string }[] = [];
+    try {
+      // Local copy so blocks created earlier in the loop resolve for later keys.
+      let workingBlocks = blocks;
+      const createdState: DbBlock[] = [];
+      for (const pb of jsonPreview) {
+        let target = workingBlocks.find(
+          (b) => b.name.trim().toLowerCase() === pb.name.toLowerCase()
+        );
+        if (!target) {
+          target = await createBlock(user.id, pb.name, '', 'vocab');
+          workingBlocks = [...workingBlocks, target];
+          createdState.push(target);
+          createdBlocks.push(pb.name);
+        }
+
+        const existing = await fetchCards(target.id);
+        const existingWords = new Set(existing.map((c) => c.word.trim().toLowerCase()));
+        const seenInBatch = new Set<string>();
+        const toInsert: Omit<Card, 'id' | 'createdAt'>[] = [];
+
+        for (const entry of pb.entries) {
+          const key = entry.word.toLowerCase();
+          if (existingWords.has(key)) {
+            errors.push({
+              block: pb.name,
+              word: entry.word,
+              reason: `A card for "${entry.word}" already exists in "${pb.name}" — skipped.`,
+            });
+            continue;
+          }
+          if (seenInBatch.has(key)) {
+            errors.push({
+              block: pb.name,
+              word: entry.word,
+              reason: `"${entry.word}" appears more than once under "${pb.name}" in the file — only the first was imported.`,
+            });
+            continue;
+          }
+          seenInBatch.add(key);
+          toInsert.push({
+            word: entry.word,
+            definition: entry.definition,
+            exampleSentence: entry.exampleSentence,
+            interval: 0,
+            easeFactor: STARTING_EASE_FACTOR,
+            repetitions: 0,
+            dueDate: new Date().toISOString(),
+            state: 'new',
+            learningStep: 0,
+          });
+        }
+
+        if (toInsert.length > 0) {
+          await insertCards(toInsert, target.id, user.id);
+        }
+        added.push({ name: pb.name, count: toInsert.length });
+      }
+
+      if (createdState.length > 0) {
+        setBlocks((prev) => [...prev, ...createdState]);
+      }
+      // Refresh the open block's cards if it received any.
+      if (currentBlockId) {
+        try {
+          setCards(await fetchCards(currentBlockId));
+        } catch {
+          /* non-fatal: the list will refresh on next open */
+        }
+      }
+      setJsonResult({ added, createdBlocks, errors });
+      setJsonPreview(null);
+    } catch (err: any) {
+      setServerError(err?.message ?? 'Failed to import JSON.');
+    } finally {
+      setIsJsonImporting(false);
     }
   };
 
@@ -814,6 +929,179 @@ function App() {
                 </button>
               </div>
             </form>
+
+            <div className="glass-form-card" style={{ marginBottom: '1.5rem' }}>
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => {
+                  setShowJsonImport((v) => !v);
+                  setJsonPreview(null);
+                  setJsonParseError(null);
+                  setJsonResult(null);
+                }}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  padding: '0.5rem 1rem',
+                  fontSize: '0.88rem',
+                  borderRadius: '8px',
+                  width: 'auto',
+                }}
+              >
+                <Upload size={15} />
+                <span>Import from JSON</span>
+                <ChevronDown size={14} style={{ transition: 'transform 0.2s', transform: showJsonImport ? 'rotate(180deg)' : 'rotate(0deg)' }} />
+              </button>
+
+              {showJsonImport && (
+                <div style={{ marginTop: '0.75rem' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', cursor: 'pointer' }}>
+                    <Upload size={16} style={{ color: 'var(--primary)', flexShrink: 0 }} />
+                    <span style={{ fontWeight: 500, color: 'var(--text-primary)', fontSize: '0.9rem' }}>
+                      Choose a .json file
+                    </span>
+                    <input
+                      type="file"
+                      accept=".json,application/json"
+                      onChange={handleJsonImportFile}
+                      style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}
+                    />
+                  </label>
+                  <p style={{ marginTop: '0.5rem', marginLeft: '1.75rem', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                    Each top-level key becomes a block (created if missing). Entries with no <code>meaning</code> get a Merriam-Webster link as their definition. Words that already exist in a block are reported as errors.
+                  </p>
+
+                  {jsonParseError && (
+                    <div
+                      style={{
+                        marginTop: '0.75rem',
+                        display: 'flex',
+                        alignItems: 'flex-start',
+                        gap: '0.5rem',
+                        padding: '0.75rem 1rem',
+                        borderRadius: '8px',
+                        background: 'rgba(239,68,68,0.12)',
+                        color: 'var(--danger, #ef4444)',
+                        fontSize: '0.85rem',
+                      }}
+                    >
+                      <AlertCircle size={16} style={{ flexShrink: 0, marginTop: '0.1rem' }} />
+                      <span>{jsonParseError}</span>
+                    </div>
+                  )}
+
+                  {jsonPreview && (
+                    <div style={{ marginTop: '1rem' }}>
+                      <h4 className="section-title" style={{ marginTop: 0, fontSize: '0.95rem' }}>
+                        Preview — {jsonPreview.length} block{jsonPreview.length !== 1 ? 's' : ''}
+                      </h4>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1rem' }}>
+                        {jsonPreview.map((pb, i) => {
+                          const exists = blocks.some(
+                            (b) => b.name.trim().toLowerCase() === pb.name.toLowerCase()
+                          );
+                          const fallbackCount = pb.entries.filter((e) => e.usedDictionaryFallback).length;
+                          return (
+                            <div
+                              key={i}
+                              style={{
+                                padding: '0.6rem 0.85rem',
+                                background: 'rgba(0,0,0,0.1)',
+                                borderRadius: '8px',
+                                fontSize: '0.85rem',
+                              }}
+                            >
+                              <strong>{pb.name}</strong>{' '}
+                              <span style={{ color: 'var(--text-muted)' }}>
+                                ({exists ? 'append to existing' : 'new block'})
+                              </span>
+                              <div style={{ color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
+                                {pb.entries.length} card{pb.entries.length !== 1 ? 's' : ''}
+                                {fallbackCount > 0 && `, ${fallbackCount} via dictionary link`}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <div style={{ display: 'flex', gap: '0.75rem' }}>
+                        <button
+                          type="button"
+                          className="btn-secondary"
+                          onClick={() => setJsonPreview(null)}
+                          disabled={isJsonImporting}
+                          style={{ flex: 'none', padding: '0.5rem 1.25rem', fontSize: '0.9rem' }}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-primary"
+                          onClick={handleConfirmJsonImport}
+                          disabled={isJsonImporting}
+                        >
+                          <Upload size={16} />
+                          <span>{isJsonImporting ? 'Importing…' : 'Import'}</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {jsonResult && (
+                    <div style={{ marginTop: '1rem' }}>
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.5rem',
+                          fontSize: '0.9rem',
+                          color: 'var(--text-primary)',
+                          marginBottom: '0.5rem',
+                        }}
+                      >
+                        <CheckCircle2 size={16} style={{ color: 'var(--primary)' }} />
+                        <span>
+                          Imported {jsonResult.added.reduce((n, a) => n + a.count, 0)} card
+                          {jsonResult.added.reduce((n, a) => n + a.count, 0) !== 1 ? 's' : ''}
+                          {jsonResult.createdBlocks.length > 0 &&
+                            ` · created ${jsonResult.createdBlocks.length} block${jsonResult.createdBlocks.length !== 1 ? 's' : ''}`}
+                        </span>
+                      </div>
+                      <ul style={{ margin: '0 0 0.5rem 1.25rem', fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
+                        {jsonResult.added.map((a, i) => (
+                          <li key={i}>
+                            {a.name}: {a.count} added
+                          </li>
+                        ))}
+                      </ul>
+
+                      {jsonResult.errors.length > 0 && (
+                        <div
+                          style={{
+                            padding: '0.75rem 1rem',
+                            borderRadius: '8px',
+                            background: 'rgba(239,68,68,0.12)',
+                            color: 'var(--danger, #ef4444)',
+                            fontSize: '0.82rem',
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 600, marginBottom: '0.4rem' }}>
+                            <AlertCircle size={15} />
+                            <span>{jsonResult.errors.length} error{jsonResult.errors.length !== 1 ? 's' : ''}</span>
+                          </div>
+                          <ul style={{ margin: '0 0 0 1.1rem' }}>
+                            {jsonResult.errors.map((err, i) => (
+                              <li key={i}>{err.reason}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
 
             <h3 className="section-title">All blocks ({blocks.length})</h3>
             {blocksLoading ? (

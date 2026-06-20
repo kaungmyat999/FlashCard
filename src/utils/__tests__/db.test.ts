@@ -127,7 +127,7 @@ describe('block CRUD', () => {
     expect(block.id).toBe('b1');
     const ops = fake.calls[0].ops;
     expect(ops[0].op).toBe('insert');
-    expect(ops[0].args[0]).toEqual({ user_id: 'u1', name: 'GRE', description: 'verbs' });
+    expect(ops[0].args[0]).toEqual({ user_id: 'u1', name: 'GRE', description: 'verbs', block_type: 'vocab' });
     expect(ops[1].op).toBe('select');
     expect(ops[2].op).toBe('single');
   });
@@ -139,6 +139,7 @@ describe('block CRUD', () => {
       user_id: 'u1',
       name: 'GRE',
       description: '',
+      block_type: 'vocab',
     });
   });
 
