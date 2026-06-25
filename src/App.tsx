@@ -27,11 +27,13 @@ import {
   Flame,
   Upload,
   ChevronDown,
+  Volume2,
+  Loader2,
 } from 'lucide-react';
 import type { Card, ReviewHistoryEntry } from './types';
 import { calculateAnki, previewLabel, STARTING_EASE_FACTOR, type AnkiRating } from './utils/sm2';
 import { generateExampleSentence, testGeminiApiKey } from './utils/gemini';
-import { fetchMwDefinition } from './utils/dictionary';
+import { fetchMwDefinition, fetchMwAudioUrl } from './utils/dictionary';
 import { useLocalStorage } from './hooks/useLocalStorage';
 import { useAuth } from './hooks/useAuth';
 import { supabase, isSupabaseConfigured } from './lib/supabase';
@@ -122,6 +124,9 @@ function App() {
   const [lookupLoading, setLookupLoading] = useState(false);
   const [lookupPartOfSpeech, setLookupPartOfSpeech] = useState('');
   const [lookupError, setLookupError] = useState<string | null>(null);
+
+  // Pronunciation playback (word currently being fetched/played, by card id)
+  const [pronouncingWord, setPronouncingWord] = useState<string | null>(null);
 
   // Card row UI: edit + copy feedback
   const [editingCardId, setEditingCardId] = useState<string | null>(null);
@@ -276,6 +281,25 @@ function App() {
       setServerError(err?.message ?? 'Sign-out failed.');
     }
   };
+
+  // Play the Merriam-Webster pronunciation for a word.
+  const handlePlayPronunciation = useCallback(async (word: string) => {
+    if (pronouncingWord) return; // already fetching/playing one
+    setPronouncingWord(word);
+    try {
+      const audioUrl = await fetchMwAudioUrl(word);
+      if (!audioUrl) {
+        setPronouncingWord(null);
+        return;
+      }
+      const audio = new Audio(audioUrl);
+      audio.onended = () => setPronouncingWord(null);
+      audio.onerror = () => setPronouncingWord(null);
+      await audio.play();
+    } catch {
+      setPronouncingWord(null);
+    }
+  }, [pronouncingWord]);
 
   // ── Handlers: study session ───────────────────────
   const startStudySession = () => {
@@ -1502,7 +1526,23 @@ function App() {
                   <div className={`flashcard ${showingBack ? 'flipped' : ''}`}>
                     <div className="card-face card-front">
                       <div className="card-content-wrapper">
-                        <h2 className="flashcard-word">{currentStudyingCard.word}</h2>
+                        <div className="flashcard-word-row">
+                          <h2 className="flashcard-word">{currentStudyingCard.word}</h2>
+                          <button
+                            className="pronounce-btn"
+                            title="Play pronunciation"
+                            aria-label="Play pronunciation"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handlePlayPronunciation(currentStudyingCard.word);
+                            }}
+                            disabled={pronouncingWord === currentStudyingCard.word}
+                          >
+                            {pronouncingWord === currentStudyingCard.word
+                              ? <Loader2 size={20} className="spin" />
+                              : <Volume2 size={20} />}
+                          </button>
+                        </div>
                         <div className="flashcard-hint">
                           <RotateCw size={14} />
                           <span>Click to reveal definition</span>
