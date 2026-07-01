@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Plus,
   Search,
@@ -282,19 +282,47 @@ function App() {
     }
   };
 
+  // A single reused <audio> element. Mobile browsers (esp. iOS Safari) only
+  // allow playback that is "unlocked" by a user gesture, and that unlock sticks
+  // to a specific element — so we keep one around instead of creating a new
+  // Audio() after the async lookup (which would no longer count as a gesture).
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioUnlockedRef = useRef(false);
+  // Minimal silent WAV used to unlock audio playback inside the tap handler.
+  const SILENT_AUDIO =
+    'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=';
+
   // Play the Merriam-Webster pronunciation for a word.
   const handlePlayPronunciation = useCallback(async (word: string) => {
     if (pronouncingWord) return; // already fetching/playing one
     setPronouncingWord(word);
+
+    let audio = audioRef.current;
+    if (!audio) {
+      audio = new Audio();
+      audioRef.current = audio;
+    }
+    audio.onended = () => setPronouncingWord(null);
+    audio.onerror = () => setPronouncingWord(null);
+
+    // Unlock synchronously, while we're still inside the tap handler. After this
+    // first gesture-driven play() the element is allowed to play again later,
+    // even after the awaited network lookup below.
+    if (!audioUnlockedRef.current) {
+      audio.src = SILENT_AUDIO;
+      audio.play().then(
+        () => { audioUnlockedRef.current = true; },
+        () => {},
+      );
+    }
+
     try {
       const audioUrl = await fetchMwAudioUrl(word);
       if (!audioUrl) {
         setPronouncingWord(null);
         return;
       }
-      const audio = new Audio(audioUrl);
-      audio.onended = () => setPronouncingWord(null);
-      audio.onerror = () => setPronouncingWord(null);
+      audio.src = audioUrl;
       await audio.play();
     } catch {
       setPronouncingWord(null);
